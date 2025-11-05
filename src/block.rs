@@ -1,6 +1,7 @@
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use std::fmt;
+use crate::transaction::Transaction;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
@@ -8,13 +9,13 @@ pub struct Block {
     pub timestamp: u64,
     pub previous_hash: String,
     pub hash: String,
-    pub data: String,
+    pub transactions: Vec<Transaction>,
     pub nonce: u64,
     pub difficulty: usize, // Number of leading zeros required
 }
 
 impl Block {
-    pub fn new(index: u32, previous_hash: String, data: String, difficulty: usize) -> Self {
+    pub fn new(index: u32, previous_hash: String, transactions: Vec<Transaction>, difficulty: usize) -> Self {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -24,7 +25,7 @@ impl Block {
             index,
             timestamp,
             previous_hash,
-            data,
+            transactions,
             hash: String::new(),
             nonce: 0,
             difficulty,
@@ -32,9 +33,10 @@ impl Block {
     }
 
     pub fn calculate_hash(&self) -> String {
+        let txs_json = serde_json::to_string(&self.transactions).unwrap();
         let input = format!(
             "{}{}{}{}{}{}",
-            self.index, self.timestamp, &self.previous_hash, &self.data, self.nonce, self.difficulty
+            self.index, self.timestamp, &self.previous_hash, txs_json, self.nonce, self.difficulty
         );
         let mut hasher = Sha256::new();
         hasher.update(input.as_bytes());
@@ -58,8 +60,8 @@ impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Block[{}]: {} | nonce: {} | hash: {}",
-            self.index, self.data, self.nonce, self.hash
+            "Block[{}]: {:?} | nonce: {} | hash: {}",
+            self.index, self.transactions, self.nonce, self.hash
         )
     }
 }
