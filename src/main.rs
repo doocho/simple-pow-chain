@@ -1,31 +1,38 @@
+// src/main.rs
 mod block;
 mod blockchain;
 mod transaction;
+mod keys;
 
-use blockchain::Blockchain;
 use transaction::Transaction;
+use blockchain::Blockchain;
+use keys::Keypair;
 
 fn main() {
-    let mut bc = Blockchain::new(4); // Difficulty 4 → hash must start with 0000
+    // 1. generate keypair
+    let alice = Keypair::new();
+    let bob = Keypair::new();
 
-    println!("🔗 블록체인 시작!");
-    println!("{:?}", bc.chain[0]);
+    println!("Alice address: {}", alice.address);
+    println!("Bob address: {}", bob.address);
 
-    let txs1 = vec![
-        Transaction::new("Alice".to_string(), "Bob".to_string(), 10),
-        Transaction::new("Bob".to_string(), "Charlie".to_string(), 5),
-    ];
-    bc.add_block(txs1);
-    
-    let txs2 = vec![Transaction::new("Bob".to_string(), "Carol".to_string(), 5)];
-    bc.add_block(txs2);
+    // 2. create transaction
+    let mut tx = Transaction::new(alice.address.clone(), bob.address.clone(), 50);
 
-    println!("\n📦 최종 체인:");
+    // 3. sign transaction
+    tx.sign(&alice.secret_key).unwrap();
+    println!("signed transaction: {}", tx);
+
+    // 4. verify transaction
+    assert!(tx.verify(), "signature verification failed!");
+    println!("signature verification successful!");
+
+    // 5. add transaction to blockchain
+    let mut bc = Blockchain::new(3);
+    bc.add_block(vec![tx]);
+
+    println!("\nfinal chain:");
     for block in &bc.chain {
         println!("{}", block);
     }
-
-    // JSON serialization example
-    let json = serde_json::to_string_pretty(&bc.chain).unwrap();
-    println!("\n📄 JSON 출력:\n{}", json);
 }
