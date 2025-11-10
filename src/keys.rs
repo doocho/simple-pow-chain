@@ -22,7 +22,7 @@ impl Keypair {
 
         let pubkey_bytes = public_key.serialize(); // 65 bytes
         let hash = Sha256::digest(&pubkey_bytes);
-        let address = format!("1{}", hex::encode(&hash[..10])); // 간단한 주소 형식
+        let address = format!("1{}", hex::encode(&hash[..10])); // Simple address format
 
         Keypair {
             secret_key: hex::encode(secret_bytes),

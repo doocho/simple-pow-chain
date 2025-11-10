@@ -36,7 +36,7 @@ impl Block {
             difficulty,
         }
     }
-    // src/block.rs (calculate_hash 부분 수정)
+    // src/block.rs (calculate_hash part modified)
     pub fn calculate_hash(&self) -> String {
         let tx_data: String = self
             .transactions
@@ -63,7 +63,7 @@ impl Block {
         loop {
             self.hash = self.calculate_hash();
             if self.hash.starts_with(&target) {
-                println!("⛏️  Mined! nonce: {}, hash: {}", self.nonce, self.hash);
+                println!("Mined! nonce: {}, hash: {}", self.nonce, self.hash);
                 break;
             }
             self.nonce += 1;
