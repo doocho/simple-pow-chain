@@ -55,8 +55,17 @@ async fn main() {
     let peers = args.peer.map(|p| vec![p]).unwrap_or_default();
 
     // Create and start node
-    let node = Node::new(blockchain.clone(), node_addr, peers);
-    node.start_listener();
+    let node = Arc::new(Node::new(blockchain.clone(), node_addr, peers.clone()));
+    node.clone().start_listener();
+
+    // If not genesis node and has peers, request blockchain
+    if !args.genesis && !peers.is_empty() {
+        sleep(Duration::from_millis(500)).await;  // Wait for listener to be ready
+        println!("Requesting blockchain from peers...");
+        if let Err(e) = node.request_blockchain().await {
+            println!("Failed to request blockchain: {}", e);
+        }
+    }
 
     // If genesis node, broadcast genesis block
     if args.genesis {

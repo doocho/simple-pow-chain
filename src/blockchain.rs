@@ -1,6 +1,8 @@
 use crate::block::Block;
 use crate::transaction::Transaction;
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
