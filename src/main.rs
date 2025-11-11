@@ -1,17 +1,17 @@
 mod block;
 mod blockchain;
-mod transaction;
 mod message;
 mod node;
+mod transaction;
 // Keys omitted (signature None demo)
 
+use blockchain::Blockchain;
 use clap::Parser;
+use node::Node;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::signal;
 use tokio::time::sleep;
-use transaction::Transaction;
-use blockchain::Blockchain;
-use node::Node;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -55,67 +55,26 @@ async fn main() {
     let peers = args.peer.map(|p| vec![p]).unwrap_or_default();
 
     // Create and start node
-    let node = Arc::new(Node::new(blockchain.clone(), node_addr, peers.clone()));
+    let node = Arc::new(Node::new(
+        blockchain.clone(),
+        node_addr.clone(),
+        peers.clone(),
+    ));
     node.clone().start_listener();
 
     // If not genesis node and has peers, request blockchain
     if !args.genesis && !peers.is_empty() {
-        sleep(Duration::from_millis(500)).await;  // Wait for listener to be ready
+        sleep(Duration::from_millis(500)).await; // Wait for listener to be ready
         println!("Requesting blockchain from peers...");
         if let Err(e) = node.request_blockchain().await {
             println!("Failed to request blockchain: {}", e);
         }
     }
 
-    // If genesis node, broadcast genesis block
-    if args.genesis {
-        sleep(Duration::from_millis(500)).await;  // Wait for listener to be ready
-        let genesis = blockchain.read().unwrap().chain[0].clone();
-        println!("Broadcasting genesis block...");
-        node.broadcast_new_block(genesis).await;
-    }
+    // Start mining for all nodes
+    node.clone().start_mining();
 
-    // Demo: Mine new transaction block (genesis node only)
-    if args.genesis {
-        sleep(Duration::from_millis(1000)).await;
-        println!("Mining new block...");
-        {
-            let mut bc_w = blockchain.write().unwrap();
-            let txs = vec![
-                Transaction::new("alice".to_string(), "bob".to_string(), 10),
-                Transaction::new("bob".to_string(), "carol".to_string(), 5),
-            ];
-            bc_w.add_block(txs);
-        }
-        let new_block = blockchain.read().unwrap().chain.last().unwrap().clone();
-        println!("Broadcasting new block...");
-        node.broadcast_new_block(new_block).await;
-    }
-
-    // Keep node running
+    // Keep node running and periodically add more transactions
     println!("Node is running. Press Ctrl+C to exit.");
-    loop {
-        if args.genesis {
-            add_block(blockchain.clone(), &node).await;
-        }
-        sleep(Duration::from_secs(12)).await;
-        let chain_len = blockchain.read().unwrap().chain.len();
-        println!("Current chain length: {}", chain_len);
-    }
-}
-
-async fn add_block(blockchain: Arc<RwLock<Blockchain>>, node: &Node) {
-    sleep(Duration::from_millis(1000)).await;
-    println!("Mining new block...");
-    {
-        let mut bc_w = blockchain.write().unwrap();
-        let txs = vec![
-            Transaction::new("alice".to_string(), "bob".to_string(), 10),
-            Transaction::new("bob".to_string(), "carol".to_string(), 5),
-        ];
-        bc_w.add_block(txs);
-    }
-    let new_block = blockchain.read().unwrap().chain.last().unwrap().clone();
-    println!("Broadcasting new block...");
-    node.broadcast_new_block(new_block).await;
+    signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
 }
