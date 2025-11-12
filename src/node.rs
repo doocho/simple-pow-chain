@@ -4,18 +4,14 @@ use crate::message::NetworkMessage;
 use crate::transaction::Transaction;
 use bincode;
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_util::sync::CancellationToken;
 
 pub struct Node {
     pub blockchain: Arc<RwLock<Blockchain>>,
     pub tx_pool: Arc<RwLock<Vec<Transaction>>>,
     listen_addr: String,
     peers: Vec<String>,
-    mining_token: CancellationToken,
-    is_mining: Arc<AtomicBool>,
 }
 
 impl Node {
@@ -29,8 +25,6 @@ impl Node {
             tx_pool: Arc::new(RwLock::new(Vec::new())),
             listen_addr,
             peers,
-            mining_token: CancellationToken::new(),
-            is_mining: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -97,6 +91,13 @@ impl Node {
         let encoded = bincode::serialize(&message)?;
         let len_bytes = (encoded.len() as u32).to_be_bytes();
 
+        // Track the best (longest) valid chain received
+        let mut best_chain: Option<Blockchain> = None;
+        let mut best_len: usize = {
+            let bc = self.blockchain.read().unwrap();
+            bc.chain.len()
+        };
+
         for peer in &self.peers {
             println!("Requesting blockchain from {}", peer);
             match TcpStream::connect(peer).await {
@@ -124,12 +125,16 @@ impl Node {
                         Ok(NetworkMessage::ResponseBlockchain(received_bc)) => {
                             println!("Received blockchain response with {} blocks from {}", received_bc.chain.len(), peer);
 
-                            // Validate received blockchain
+                            // Validate received blockchain and keep if it's longer
                             if validate_blockchain(&received_bc) {
-                                let mut bc = self.blockchain.write().unwrap();
-                                *bc = received_bc;
-                                println!("Blockchain updated! New chain length: {}", bc.chain.len());
-                                return Ok(()); // Successfully received and applied blockchain
+                                let received_len = received_bc.chain.len();
+                                if received_len > best_len {
+                                    println!("Found a longer valid chain from {} ({} > {})", peer, received_len, best_len);
+                                    best_len = received_len;
+                                    best_chain = Some(received_bc);
+                                } else {
+                                    println!("Received chain from {} is not longer ({} <= {}), ignoring", peer, received_len, best_len);
+                                }
                             } else {
                                 println!("Received blockchain from {} is invalid, rejected!", peer);
                             }
@@ -146,7 +151,14 @@ impl Node {
             }
         }
 
-        println!("Failed to get blockchain from any peer");
+        // After querying all peers, apply the best chain if any
+        if let Some(new_chain) = best_chain {
+            let mut bc = self.blockchain.write().unwrap();
+            *bc = new_chain;
+            println!("Blockchain updated to longest valid chain. New chain length: {}", bc.chain.len());
+        } else {
+            println!("No longer valid chain found from peers");
+        }
         Ok(())
     }
 
@@ -241,76 +253,57 @@ impl Node {
         Some(new_block)
     }
 
-    /// Stop current mining process
-    pub fn stop_mining(&self) {
-        if self.is_mining.load(Ordering::SeqCst) {
-            println!("Stopping mining process...");
-            self.mining_token.cancel();
-            self.is_mining.store(false, Ordering::SeqCst);
-        }
-    }
-
     /// Start background mining process
     pub fn start_mining(self: Arc<Self>) {
         let node = self.clone();
-        let token = self.mining_token.clone();
-        let is_mining = self.is_mining.clone();
 
         tokio::spawn(async move {
             println!("Started background mining process");
-            is_mining.store(true, Ordering::SeqCst);
 
             loop {
-                tokio::select! {
-                    _ = token.cancelled() => {
-                        println!("Mining cancelled");
-                        is_mining.store(false, Ordering::SeqCst);
-                        break;
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+                // Check if we have transactions to mine and if we're behind the network
+                let should_mine = {
+                    let tx_pool = node.tx_pool.read().unwrap();
+                    let has_transactions = !tx_pool.is_empty();
+
+                    // Also check if we're behind - if tx pool has reward transactions from mining
+                    let has_pending_rewards = tx_pool.iter().any(|tx| tx.to == "reward");
+                    drop(tx_pool);
+
+                    has_transactions || has_pending_rewards
+                };
+
+                if should_mine {
+                    let pool_size = {
+                        let tx_pool = node.tx_pool.read().unwrap();
+                        tx_pool.len()
+                    };
+
+                    println!("*****************************************************");
+                    println!("Mining with {} transactions in pool", pool_size);
+
+                    if let Some(mined_block) = node.mine_block().await {
+                        println!("Broadcasting mined block #{}", mined_block.index);
+                        node.broadcast_new_block(mined_block).await;
+
+                        // Mining successful, wait a bit before continuing
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    } else {
+                        // Mining failed (another node mined first), wait longer
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
-                        // Check if we have transactions to mine and if we're behind the network
-                        let should_mine = {
-                            let tx_pool = node.tx_pool.read().unwrap();
-                            let has_transactions = !tx_pool.is_empty();
-
-                            // Also check if we're behind - if tx pool has reward transactions from mining
-                            let has_pending_rewards = tx_pool.iter().any(|tx| tx.to == "reward");
-                            drop(tx_pool);
-
-                            has_transactions || has_pending_rewards
-                        };
-
-                        if should_mine {
-                            let pool_size = {
-                                let tx_pool = node.tx_pool.read().unwrap();
-                                tx_pool.len()
-                            };
-
-                            println!("*****************************************************");
-                            println!("Mining with {} transactions in pool", pool_size);
-
-                            if let Some(mined_block) = node.mine_block().await {
-                                println!("Broadcasting mined block #{}", mined_block.index);
-                                node.broadcast_new_block(mined_block).await;
-
-                                // Mining successful, wait a bit before continuing
-                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                            } else {
-                                // Mining failed (another node mined first), wait longer
-                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                            }
-                        } else {
-                            // Add a dummy reward transaction to keep mining active
-                            {
-                                let mut tx_pool = node.tx_pool.write().unwrap();
-                                let dummy_tx = Transaction::new(
-                                    format!("miner_{}", node.listen_addr),
-                                    "reward".to_string(),
-                                    1,
-                                );
-                                tx_pool.push(dummy_tx);
-                            }
-                        }
+                } else {
+                    // Add a dummy reward transaction to keep mining active
+                    {
+                        let mut tx_pool = node.tx_pool.write().unwrap();
+                        let dummy_tx = Transaction::new(
+                            format!("miner_{}", node.listen_addr),
+                            "reward".to_string(),
+                            1,
+                        );
+                        tx_pool.push(dummy_tx);
                     }
                 }
             }
@@ -376,14 +369,6 @@ async fn handle_connection(mut stream: TcpStream, node: Arc<Node>) {
                     tx_pool.retain(|tx| !block_tx_hashes.contains(&tx.hash()));
                     println!("Transaction pool updated after adding block, remaining: {}", tx_pool.len());
                     drop(tx_pool);
-
-                    // Stop current mining and restart
-                    node.stop_mining();
-                    let node_clone = node.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        node_clone.start_mining();
-                    });
                 } else {
                     println!("Block #{} no longer valid after acquiring write lock (chain changed)", block.index);
                 }
