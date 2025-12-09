@@ -25,10 +25,10 @@ cargo build --release
 # Terminal 1: Start seed node
 cargo run -- seed
 
-# Terminal 2: Genesis node
-cargo run -- node --genesis --seed 127.0.0.1:9000 --mine
+# Terminal 2: First node (creates genesis automatically)
+cargo run -- node --seed 127.0.0.1:9000 --mine
 
-# Terminal 3: Second node (auto-discovers peers via seed)
+# Terminal 3: Second node (syncs from first node via seed)
 cargo run -- node --port 8081 --seed 127.0.0.1:9000 --mine
 
 # Terminal 4: Third node
@@ -38,8 +38,8 @@ cargo run -- node --port 8082 --seed 127.0.0.1:9000 --mine
 ### Direct Peer Connection
 
 ```bash
-# Terminal 1: Genesis node
-cargo run -- node --genesis --mine
+# Terminal 1: First node
+cargo run -- node --mine
 
 # Terminal 2: Connect directly to peer
 cargo run -- node --port 8081 --peer 127.0.0.1:8080 --mine
@@ -68,7 +68,6 @@ cargo run -- node [OPTIONS]
 | `-p, --port <PORT>` | Listen port | 8080 |
 | `-s, --seed <ADDR>` | Seed node address for peer discovery | - |
 | `-e, --peer <ADDR>` | Direct peer address | - |
-| `--genesis` | Create genesis block | false |
 | `-d, --difficulty <N>` | PoW difficulty (leading zeros) | 4 |
 | `-m, --miner <ADDR>` | Miner address for rewards | miner |
 | `--mine` | Enable auto-mining | false |
@@ -95,7 +94,7 @@ src/
    - Gets list of other registered peers
    - Connects to discovered peers
 
-3. **Blockchain Sync**: New nodes sync by requesting the blockchain from peers and adopting the longest valid chain.
+3. **Blockchain Sync**: Nodes try to sync from peers. If no peers available, genesis block is created automatically.
 
 4. **Mining**: Nodes with `--mine` continuously mine new blocks and broadcast them to peers.
 

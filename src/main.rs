@@ -35,10 +35,6 @@ enum Commands {
         #[arg(short = 'e', long)]
         peer: Option<String>,
 
-        /// Start as genesis node (create genesis block)
-        #[arg(long)]
-        genesis: bool,
-
         /// Mining difficulty (number of leading zeros)
         #[arg(short, long, default_value = "4")]
         difficulty: usize,
@@ -68,12 +64,11 @@ async fn main() {
             port,
             seed,
             peer,
-            genesis,
             difficulty,
             miner,
             mine,
         } => {
-            run_node(port, seed, peer, genesis, difficulty, miner, mine).await;
+            run_node(port, seed, peer, difficulty, miner, mine).await;
         }
         Commands::Seed { port } => {
             run_seed(port).await;
@@ -85,7 +80,6 @@ async fn run_node(
     port: u16,
     seed_addr: Option<String>,
     peer: Option<String>,
-    genesis: bool,
     difficulty: usize,
     miner: String,
     mine: bool,
@@ -93,15 +87,6 @@ async fn run_node(
     println!("=== Simple PoW Chain ===");
     println!("Port: {}", port);
     println!("Difficulty: {}", difficulty);
-    println!("Genesis: {}", genesis);
-
-    // Create blockchain
-    let blockchain = if genesis {
-        println!("Creating genesis block...");
-        Blockchain::new(difficulty)
-    } else {
-        Blockchain::empty(difficulty)
-    };
 
     // Setup node address
     let addr = format!("127.0.0.1:{}", port);
@@ -113,14 +98,7 @@ async fn run_node(
     if let Some(ref seed) = seed_addr {
         println!("Connecting to seed node: {}", seed);
 
-        // Register ourselves with seed
-        if let Err(e) = seed::register_with_seed(seed, &addr).await {
-            eprintln!("Failed to register with seed: {}", e);
-        } else {
-            println!("Registered with seed node");
-        }
-
-        // Get peer list from seed
+        // Get peer list from seed first (before registering)
         match seed::get_peers_from_seed(seed).await {
             Ok(discovered) => {
                 println!("Discovered {} peers from seed", discovered.len());
@@ -132,21 +110,45 @@ async fn run_node(
             }
             Err(e) => eprintln!("Failed to get peers from seed: {}", e),
         }
+
+        // Then register ourselves with seed
+        if let Err(e) = seed::register_with_seed(seed, &addr).await {
+            eprintln!("Failed to register with seed: {}", e);
+        } else {
+            println!("Registered with seed node");
+        }
     }
 
     if !peers.is_empty() {
         println!("Peers: {:?}", peers);
     }
 
+    // Start with empty blockchain, will sync or create genesis as needed
+    let blockchain = Blockchain::empty(difficulty);
     let node = Arc::new(Node::new(blockchain, addr.clone(), peers.clone()));
 
-    // Sync from peers if not genesis
-    if !genesis && !peers.is_empty() {
+    // Try to sync from peers
+    let mut synced = false;
+    if !peers.is_empty() {
         println!("Syncing from peers...");
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         if let Err(e) = node.sync().await {
             eprintln!("Sync error: {}", e);
+        } else {
+            let chain_len = node.blockchain.read().unwrap().len();
+            if chain_len > 0 {
+                println!("Synced blockchain with {} blocks", chain_len);
+                synced = true;
+            }
         }
+    }
+
+    // If no sync happened, create genesis block
+    if !synced {
+        println!("No peers to sync from, creating genesis block...");
+        let mut bc = node.blockchain.write().unwrap();
+        *bc = Blockchain::new(difficulty);
+        println!("Genesis block created");
     }
 
     // Start mining in background if enabled
