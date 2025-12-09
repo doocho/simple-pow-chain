@@ -15,4 +15,10 @@ pub enum Message {
     GetBlocks,
     /// Response with the full blockchain
     Blocks(Blockchain),
+    /// Register with seed node (send our address)
+    Register(String),
+    /// Request peer list from seed node
+    GetPeers,
+    /// Response with peer list
+    Peers(Vec<String>),
 }

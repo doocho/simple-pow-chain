@@ -12,7 +12,7 @@ pub struct Node {
     pub blockchain: Arc<RwLock<Blockchain>>,
     pub mempool: Arc<RwLock<Vec<Transaction>>>,
     pub addr: String,
-    pub peers: Vec<String>,
+    pub peers: Arc<RwLock<Vec<String>>>,
 }
 
 impl Node {
@@ -22,8 +22,22 @@ impl Node {
             blockchain: Arc::new(RwLock::new(blockchain)),
             mempool: Arc::new(RwLock::new(Vec::new())),
             addr,
-            peers,
+            peers: Arc::new(RwLock::new(peers)),
         }
+    }
+
+    /// Add a peer to the list
+    pub fn add_peer(&self, peer: String) {
+        let mut peers = self.peers.write().unwrap();
+        if !peers.contains(&peer) && peer != self.addr {
+            println!("Adding peer: {}", peer);
+            peers.push(peer);
+        }
+    }
+
+    /// Get current peer list
+    pub fn get_peers(&self) -> Vec<String> {
+        self.peers.read().unwrap().clone()
     }
 
     /// Start listening for connections
@@ -71,8 +85,9 @@ impl Node {
     /// Broadcast a block to all peers
     pub async fn broadcast_block(&self, block: &Block) {
         let msg = Message::NewBlock(block.clone());
-        for peer in &self.peers {
-            if let Err(e) = Self::send_message(peer, &msg).await {
+        let peers = self.get_peers();
+        for peer in peers {
+            if let Err(e) = Self::send_message(&peer, &msg).await {
                 eprintln!("Failed to send to {}: {}", peer, e);
             }
         }
@@ -81,8 +96,9 @@ impl Node {
     /// Broadcast a transaction to all peers
     pub async fn broadcast_transaction(&self, tx: &Transaction) {
         let msg = Message::NewTransaction(tx.clone());
-        for peer in &self.peers {
-            if let Err(e) = Self::send_message(peer, &msg).await {
+        let peers = self.get_peers();
+        for peer in peers {
+            if let Err(e) = Self::send_message(&peer, &msg).await {
                 eprintln!("Failed to send to {}: {}", peer, e);
             }
         }
@@ -98,10 +114,11 @@ impl Node {
         let mut best_chain: Option<Blockchain> = None;
         let mut best_len = current_len;
 
-        for peer in &self.peers {
+        let peers = self.get_peers();
+        for peer in peers {
             println!("Requesting blockchain from {}", peer);
 
-            match Self::send_message(peer, &Message::GetBlocks).await {
+            match Self::send_message(&peer, &Message::GetBlocks).await {
                 Ok(Some(Message::Blocks(chain))) => {
                     if chain.is_valid() && chain.len() > best_len {
                         println!("Found longer valid chain from {} ({} blocks)", peer, chain.len());
@@ -218,6 +235,10 @@ async fn handle_connection(
 
         Message::Blocks(_) => {
             // Handled by sync()
+        }
+
+        Message::Register(_) | Message::GetPeers | Message::Peers(_) => {
+            // Handled by seed node
         }
     }
 
