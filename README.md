@@ -26,23 +26,23 @@ cargo build --release
 cargo run -- seed
 
 # Terminal 2: First node (creates genesis automatically)
-cargo run -- node --seed 127.0.0.1:9000 --mine
+cargo run -- node --seed 127.0.0.1:9000
 
 # Terminal 3: Second node (syncs from first node via seed)
-cargo run -- node --port 8081 --seed 127.0.0.1:9000 --mine
+cargo run -- node --port 8081 --seed 127.0.0.1:9000
 
 # Terminal 4: Third node
-cargo run -- node --port 8082 --seed 127.0.0.1:9000 --mine
+cargo run -- node --port 8082 --seed 127.0.0.1:9000
 ```
 
 ### Direct Peer Connection
 
 ```bash
 # Terminal 1: First node
-cargo run -- node --mine
+cargo run -- node
 
 # Terminal 2: Connect directly to peer
-cargo run -- node --port 8081 --peer 127.0.0.1:8080 --mine
+cargo run -- node --port 8081 --peer 127.0.0.1:8080
 ```
 
 ## Commands
@@ -70,7 +70,7 @@ cargo run -- node [OPTIONS]
 | `-e, --peer <ADDR>` | Direct peer address | - |
 | `-d, --difficulty <N>` | PoW difficulty (leading zeros) | 4 |
 | `-m, --miner <ADDR>` | Miner address for rewards | miner |
-| `--mine` | Enable auto-mining | false |
+| `--no-mine` | Disable auto-mining | false |
 
 ## Architecture
 

@@ -43,9 +43,9 @@ enum Commands {
         #[arg(short, long, default_value = "miner")]
         miner: String,
 
-        /// Enable auto-mining
+        /// Disable auto-mining
         #[arg(long)]
-        mine: bool,
+        no_mine: bool,
     },
     /// Run a seed node for peer discovery
     Seed {
@@ -66,9 +66,9 @@ async fn main() {
             peer,
             difficulty,
             miner,
-            mine,
+            no_mine,
         } => {
-            run_node(port, seed, peer, difficulty, miner, mine).await;
+            run_node(port, seed, peer, difficulty, miner, !no_mine).await;
         }
         Commands::Seed { port } => {
             run_seed(port).await;
