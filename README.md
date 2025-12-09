@@ -87,16 +87,17 @@ src/
 
 ## How It Works
 
-1. **Seed Node**: Maintains a registry of active peers. New nodes register with the seed and receive a list of known peers.
+1. **Seed Node**: Maintains a registry of active peers for peer discovery.
 
-2. **Node Discovery**: When a node starts with `--seed`, it:
+2. **Node Startup**: When a node starts with `--seed`, it:
+   - Gets list of existing peers from seed
    - Registers itself with the seed node
-   - Gets list of other registered peers
-   - Connects to discovered peers
+   - Syncs blockchain from discovered peers
+   - Creates genesis block if no peers found
 
-3. **Blockchain Sync**: Nodes try to sync from peers. If no peers available, genesis block is created automatically.
+3. **Mining**: Nodes with `--mine` continuously mine new blocks and broadcast them to peers.
 
-4. **Mining**: Nodes with `--mine` continuously mine new blocks and broadcast them to peers.
+4. **Consensus**: Nodes follow the longest valid chain rule when syncing.
 
 ## License
 
