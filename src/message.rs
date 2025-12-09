@@ -1,12 +1,18 @@
 use serde::{Deserialize, Serialize};
+
 use crate::block::Block;
 use crate::blockchain::Blockchain;
 use crate::transaction::Transaction;
 
+/// Network messages for P2P communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum NetworkMessage {
+pub enum Message {
+    /// Broadcast a newly mined block
     NewBlock(Block),
-    RequestBlockchain,
-    ResponseBlockchain(Blockchain),
+    /// Broadcast a new transaction
     NewTransaction(Transaction),
+    /// Request the full blockchain
+    GetBlocks,
+    /// Response with the full blockchain
+    Blocks(Blockchain),
 }

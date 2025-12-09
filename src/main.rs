@@ -3,78 +3,95 @@ mod blockchain;
 mod message;
 mod node;
 mod transaction;
-// Keys omitted (signature None demo)
 
 use blockchain::Blockchain;
 use clap::Parser;
 use node::Node;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
-use tokio::signal;
-use tokio::time::sleep;
+use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(name = "simple-pow-chain")]
+#[command(about = "A simple Bitcoin-like PoW blockchain")]
 struct Args {
     /// Port to listen on
     #[arg(short, long, default_value = "8080")]
     port: u16,
 
-    /// Peer node to connect to (format: ip:port)
+    /// Peer address to connect to (e.g., 127.0.0.1:8080)
     #[arg(short = 'e', long)]
     peer: Option<String>,
 
-    /// Create genesis block (first node only)
+    /// Start as genesis node (create genesis block)
     #[arg(long)]
     genesis: bool,
+
+    /// Mining difficulty (number of leading zeros)
+    #[arg(short, long, default_value = "4")]
+    difficulty: usize,
+
+    /// Miner address for rewards
+    #[arg(short, long, default_value = "miner")]
+    miner: String,
+
+    /// Enable auto-mining
+    #[arg(long)]
+    mine: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    println!("Starting P2P blockchain node!");
+    println!("=== Simple PoW Chain ===");
     println!("Port: {}", args.port);
-    if let Some(peer) = &args.peer {
-        println!("Peer: {}", peer);
-    }
+    println!("Difficulty: {}", args.difficulty);
     println!("Genesis: {}", args.genesis);
 
-    // Initialize blockchain
+    // Create blockchain
     let blockchain = if args.genesis {
-        Arc::new(RwLock::new(Blockchain::new(3)))
+        println!("Creating genesis block...");
+        Blockchain::new(args.difficulty)
     } else {
-        Arc::new(RwLock::new(Blockchain {
-            chain: vec![],
-            difficulty: 3,
-        }))
+        Blockchain::empty(args.difficulty)
     };
 
-    // Set node address
-    let node_addr = format!("127.0.0.1:{}", args.port);
+    // Setup node
+    let addr = format!("127.0.0.1:{}", args.port);
     let peers = args.peer.map(|p| vec![p]).unwrap_or_default();
 
-    // Create and start node
-    let node = Arc::new(Node::new(
-        blockchain.clone(),
-        node_addr.clone(),
-        peers.clone(),
-    ));
-    node.clone().start_listener();
+    if !peers.is_empty() {
+        println!("Peers: {:?}", peers);
+    }
 
-    // If not genesis node and has peers, request blockchain
+    let node = Arc::new(Node::new(blockchain, addr.clone(), peers.clone()));
+
+    // Sync from peers if not genesis
     if !args.genesis && !peers.is_empty() {
-        sleep(Duration::from_millis(500)).await; // Wait for listener to be ready
-        println!("Requesting blockchain from peers...");
-        if let Err(e) = node.request_blockchain().await {
-            println!("Failed to request blockchain: {}", e);
+        println!("Syncing from peers...");
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        if let Err(e) = node.sync().await {
+            eprintln!("Sync error: {}", e);
         }
     }
 
-    // Start mining for all nodes
-    node.clone().start_mining();
+    // Start mining in background if enabled
+    if args.mine {
+        let mining_node = node.clone();
+        let miner = args.miner.clone();
+        tokio::spawn(async move {
+            println!("Starting miner...");
+            loop {
+                if let Some(block) = mining_node.mine(&miner).await {
+                    mining_node.broadcast_block(&block).await;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        });
+    }
 
-    // Keep node running and periodically add more transactions
-    println!("Node is running. Press Ctrl+C to exit.");
-    signal::ctrl_c().await.expect("Failed to listen for shutdown signal");
+    // Start listening
+    println!("Node starting on {}", addr);
+    if let Err(e) = node.start().await {
+        eprintln!("Node error: {}", e);
+    }
 }

@@ -1,82 +1,95 @@
-use crate::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fmt;
 
+use crate::transaction::Transaction;
+
+/// A block in the blockchain
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
-    pub index: u32,
+    pub index: u64,
     pub timestamp: u64,
-    pub previous_hash: String,
+    pub prev_hash: String,
     pub hash: String,
-    pub transactions: Vec<Transaction>,
     pub nonce: u64,
-    pub difficulty: usize, // Number of leading zeros required
+    pub difficulty: usize,
+    pub transactions: Vec<Transaction>,
 }
 
 impl Block {
-    pub fn new(
-        index: u32,
-        previous_hash: String,
-        transactions: Vec<Transaction>,
-        difficulty: usize,
-    ) -> Self {
+    /// Create a new block (not yet mined)
+    pub fn new(index: u64, prev_hash: String, transactions: Vec<Transaction>, difficulty: usize) -> Self {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
-        Block {
+        let mut block = Block {
             index,
             timestamp,
-            previous_hash,
-            transactions,
+            prev_hash,
             hash: String::new(),
             nonce: 0,
             difficulty,
-        }
+            transactions,
+        };
+        block.hash = block.calculate_hash();
+        block
     }
-    // src/block.rs (calculate_hash part modified)
+
+    /// Calculate SHA-256 hash of the block
     pub fn calculate_hash(&self) -> String {
         let tx_data: String = self
             .transactions
             .iter()
-            .map(|tx| {
-                let sig = tx.signature.as_deref().unwrap_or("");
-                format!("{}{}{}{}", tx.from, tx.to, tx.amount, sig)
-            })
+            .map(|tx| tx.hash())
             .collect::<Vec<String>>()
             .join("");
 
-        let input = format!(
-            "{}{}{}{}{}{}",
-            self.index, self.timestamp, &self.previous_hash, tx_data, self.nonce, self.difficulty
+        let data = format!(
+            "{}{}{}{}{}",
+            self.index, self.timestamp, self.prev_hash, self.nonce, tx_data
         );
 
         let mut hasher = Sha256::new();
-        hasher.update(input.as_bytes());
+        hasher.update(data.as_bytes());
         hex::encode(hasher.finalize())
     }
 
+    /// Mine the block by finding a valid nonce
     pub fn mine(&mut self) {
         let target = "0".repeat(self.difficulty);
         loop {
             self.hash = self.calculate_hash();
             if self.hash.starts_with(&target) {
-                println!("Mined! nonce: {}, hash: {}", self.nonce, self.hash);
+                println!("Block {} mined! Hash: {}", self.index, self.hash);
                 break;
             }
             self.nonce += 1;
         }
     }
+
+    /// Verify if the block has valid proof of work
+    pub fn is_valid_pow(&self) -> bool {
+        let target = "0".repeat(self.difficulty);
+        self.hash == self.calculate_hash() && self.hash.starts_with(&target)
+    }
+
+    /// Create genesis block
+    pub fn genesis(difficulty: usize) -> Self {
+        let mut block = Block::new(0, String::from("0"), vec![], difficulty);
+        block.mine();
+        block
+    }
 }
 
-impl fmt::Display for Block {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Block[{}]: {:?} | nonce: {} | hash: {}",
-            self.index, self.transactions, self.nonce, self.hash
+            "Block #{} [hash: {}..., txs: {}]",
+            self.index,
+            &self.hash[..16],
+            self.transactions.len()
         )
     }
 }

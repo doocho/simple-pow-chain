@@ -1,88 +1,118 @@
-use hex;
 use secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// A transaction transferring coins between addresses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
     pub from: String,
     pub to: String,
     pub amount: u64,
-    pub public_key: Option<String>,
     pub signature: Option<String>,
+    pub public_key: Option<String>,
 }
 
 impl Transaction {
+    /// Create a new unsigned transaction
     pub fn new(from: String, to: String, amount: u64) -> Self {
         Transaction {
             from,
             to,
             amount,
-            public_key: None,
             signature: None,
+            public_key: None,
         }
     }
 
-    /// Generate a hash based on the transaction contents
+    /// Create a coinbase (mining reward) transaction
+    pub fn coinbase(to: String, amount: u64) -> Self {
+        Transaction {
+            from: String::from("coinbase"),
+            to,
+            amount,
+            signature: None,
+            public_key: None,
+        }
+    }
+
+    /// Calculate hash of the transaction
     pub fn hash(&self) -> String {
-        let input = format!("{}{}{}", self.from, self.to, self.amount);
+        let data = format!("{}{}{}", self.from, self.to, self.amount);
         let mut hasher = Sha256::new();
-        hasher.update(input.as_bytes());
+        hasher.update(data.as_bytes());
         hex::encode(hasher.finalize())
     }
 
+    /// Sign the transaction with a private key
     pub fn sign(&mut self, secret_key_hex: &str) -> Result<(), String> {
         let secp = Secp256k1::new();
-        let secret_key = SecretKey::from_slice(&hex::decode(secret_key_hex).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+
+        let secret_bytes = hex::decode(secret_key_hex).map_err(|e| e.to_string())?;
+        let secret_key = SecretKey::from_slice(&secret_bytes).map_err(|e| e.to_string())?;
         let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        let message = Message::from_digest_slice(&hex::decode(self.hash()).unwrap()).unwrap();
+
+        let hash_bytes = hex::decode(self.hash()).map_err(|e| e.to_string())?;
+        let message = Message::from_digest_slice(&hash_bytes).map_err(|e| e.to_string())?;
+
         let signature = secp.sign_ecdsa(&message, &secret_key);
+
         self.public_key = Some(hex::encode(public_key.serialize()));
         self.signature = Some(hex::encode(signature.serialize_der()));
+
         Ok(())
     }
 
+    /// Verify the transaction signature
     pub fn verify(&self) -> bool {
-        if self.signature.is_none() || self.public_key.is_none() {
-            return false;
+        // Coinbase transactions don't need verification
+        if self.from == "coinbase" {
+            return true;
         }
 
+        let (sig_hex, pubkey_hex) = match (&self.signature, &self.public_key) {
+            (Some(s), Some(p)) => (s, p),
+            _ => return false,
+        };
+
         let secp = Secp256k1::new();
-        let sig = match secp256k1::ecdsa::Signature::from_der(
-            &hex::decode(self.signature.as_ref().unwrap()).unwrap(),
-        ) {
+
+        let sig_bytes = match hex::decode(sig_hex) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+
+        let signature = match secp256k1::ecdsa::Signature::from_der(&sig_bytes) {
             Ok(s) => s,
             Err(_) => return false,
         };
 
-        let msg = match Message::from_digest_slice(&hex::decode(self.hash()).unwrap()) {
-            Ok(m) => m,
+        let pubkey_bytes = match hex::decode(pubkey_hex) {
+            Ok(b) => b,
             Err(_) => return false,
         };
 
-        let pubkey = match PublicKey::from_slice(&hex::decode(self.public_key.as_ref().unwrap()).unwrap()) {
+        let public_key = match PublicKey::from_slice(&pubkey_bytes) {
             Ok(p) => p,
             Err(_) => return false,
         };
 
-        secp.verify_ecdsa(&msg, &sig, &pubkey).is_ok()
+        let hash_bytes = match hex::decode(self.hash()) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+
+        let message = match Message::from_digest_slice(&hash_bytes) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+
+        secp.verify_ecdsa(&message, &signature, &public_key).is_ok()
     }
 }
 
 impl std::fmt::Display for Transaction {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{} → {}: {} coins {}",
-            self.from,
-            self.to,
-            self.amount,
-            if self.signature.is_some() {
-                "(signed)"
-            } else {
-                ""
-            }
-        )
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let signed = if self.signature.is_some() { " (signed)" } else { "" };
+        write!(f, "{} -> {}: {}{}", self.from, self.to, self.amount, signed)
     }
 }
